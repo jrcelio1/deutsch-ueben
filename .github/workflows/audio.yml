@@ -1,0 +1,65 @@
+name: Gerar áudios de pronúncia
+
+# Roda sozinho sempre que você sobe questões novas (pasta data/).
+# Também pode ser disparado à mão: aba Actions > "Gerar áudios de pronúncia" > Run workflow.
+on:
+  push:
+    paths:
+      - "data/**"
+      - "tools/gerar_audio.py"
+  workflow_dispatch:
+    inputs:
+      rebuscar:
+        description: "Procurar de novo gravações humanas para palavras que hoje usam voz sintética"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: audio
+  cancel-in-progress: false
+
+jobs:
+  audio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Guardar a voz do Piper entre execuções
+        uses: actions/cache@v4
+        with:
+          path: .cache-voz
+          key: piper-voz-thorsten-v1
+
+      - name: Instalar Piper e ffmpeg
+        run: |
+          pip install --quiet piper-tts
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: Gerar áudios
+        run: python tools/gerar_audio.py ${{ inputs.rebuscar && '--rebuscar' || '' }}
+
+      - name: Salvar os áudios no repositório
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add audio
+          if git diff --cached --quiet; then
+            echo "Nenhum áudio novo."
+            exit 0
+          fi
+          git commit -m "Áudios de pronúncia atualizados"
+          git push
+
+      - name: Pedir ao GitHub Pages para publicar de novo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || echo "O Pages vai publicar sozinho no próximo envio."
